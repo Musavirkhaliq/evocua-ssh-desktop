@@ -1,0 +1,19 @@
+name: Check
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Bash, Python, and JavaScript
+        run: |
+          for script in evocua-desktop ./*.sh novnc/*.sh; do bash -n "$script" || exit; done
+          python3 -m compileall -q novnc
+          for script in novnc/*.js; do node --check "$script" || exit; done
+          ./evocua-desktop --help

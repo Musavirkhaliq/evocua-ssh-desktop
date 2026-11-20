@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
+usage() {
+    cat <<'EOF'
+Usage: evocua-desktop COMMAND [ARGS]
+
+Host commands:
+  doctor                    Check Linux dependencies and audio
+  start                     Start browser access to the desktop
+  status                    Check whether the browser endpoint is running
+  stop                      Stop browser access and keep desktop apps running
+  run APP [ARGS...]          Launch an app in the remote desktop session
+
+Client command:
+  tunnel USER@HOST [PORT]    Forward the browser endpoint over SSH
+EOF
+}
+
+valid_port() {
+    [[ $1 =~ ^[1-9][0-9]{0,4}$ ]] && (( $1 <= 65535 ))
+}
+
+command=${1:-help}
+case "$command" in
+    doctor) exec "$script_dir/start_novnc.sh" --doctor ;;
+    start) exec "$script_dir/start_novnc.sh" ;;
+    stop) exec "$script_dir/stop_novnc.sh" ;;
+    run) shift; exec "$script_dir/desktop-run.sh" "$@" ;;
+    status)
+        source "$script_dir/novnc/session.sh"
+        port=${EVOCUA_WEB_PORT:-6080}
+        if ! valid_port "$port"; then
+            echo "Invalid EVOCUA_WEB_PORT: $port" >&2
+            exit 2
+        fi
+        if [[ $(curl -fsS --max-time 2 "http://127.0.0.1:$port/healthz" 2>/dev/null) == "evocua-desktop-4 $DISPLAY" ]]; then
+            printf 'Desktop %s is running on http://localhost:%s/\n' "$DISPLAY" "$port"
+        else
+            printf 'Desktop %s is unavailable on port %s.\n' "$DISPLAY" "$port" >&2
+            exit 1
+        fi
+        ;;
+    tunnel)
+        if (( $# < 2 || $# > 3 )); then
+            echo 'Usage: evocua-desktop tunnel USER@HOST [LOCAL_PORT]' >&2
+            exit 2
+        fi
+        remote_port=${EVOCUA_WEB_PORT:-6080}
+        local_port=${3:-$remote_port}
+        if ! valid_port "$local_port" || ! valid_port "$remote_port"; then
+            echo 'SSH forwarding ports must be between 1 and 65535.' >&2
+            exit 2
+        fi
+        printf 'Open http://localhost:%s/ once the SSH connection is established.\n' "$local_port"
+        exec ssh -N -T -o ExitOnForwardFailure=yes \
+            -L "127.0.0.1:$local_port:127.0.0.1:$remote_port" -- "$2"
+        ;;
+    help|-h|--help) usage ;;
+    *) usage >&2; exit 2 ;;
+esac
